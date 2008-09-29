@@ -8,7 +8,7 @@ use List::Util 'reduce';
 use Params::Validate qw/ validate_pos SCALAR /;
 use Regexp::Common;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 __PACKAGE__->mk_accessors(qw/ _points _sorted_points _tour /);
 
@@ -20,8 +20,9 @@ Algorithm::TravelingSalesman::BitonicTour - solve the euclidean traveling-salesm
 
     use Algorithm::TravelingSalesman::BitonicTour;
     my $bt = Algorithm::TravelingSalesman::BitonicTour->new;
-    $bt->add_point($x1,$y2);
+    $bt->add_point($x1,$y1);
     $bt->add_point($x2,$y2);
+    $bt->add_point($x3,$y3);
     # ...add other points as needed...
 
     # get and print the solution
@@ -87,34 +88,35 @@ find.
 An open bitonic tour, optimal or not, has these properties:
 
  * it's bitonic (a vertical line crosses the tour at most twice)
- * it's open (it has endpoints), with endpoints (i,j)
+ * it's open (it has endpoints), which we call "i" and "j" (i < j)
  * all points to the left of "j" are visited by the tour
- * points i and j are connected to exactly one edge
+ * points i and j are endpoints (connected to exactly one edge)
  * all other points in the tour are connected to two edges
 
 For a given set of points there may be many open bitonic tours with endpoints
-(i,j), but we are only interested in the I<optimal> tour--the tour with the
-shortest length. Let's call this tour B<C<T(i,j)>>.
+(i,j), but we are only interested in the I<optimal> open tour--the tour with
+the shortest length. Let's call this tour B<C<T(i,j)>>.
 
-=item 2. Grok the messy recurrence relation.
+=item 2. Grok the (slightly) messy recurrence relation.
 
-Here's a concrete example: assume we know the optimal tour lengths for all
-(i,j) to the right of point C<5>:
+A concrete example helps clarify this.  Assume we know the optimal tour lengths
+for all (i,j) to the right of point C<5>:
 
     T(0,1)
     T(0,2)  T(1,2)
     T(0,3)  T(1,3)  T(2,3)
     T(0,4)  T(1,4)  T(2,4)  T(3,4)
 
-From this information, can we find C<T(0,5)-T(4,5)>?
+From this information, we can find C<T(0,5)>, C<T(1,5)>, ... C<T(4,5)>.
 
 =over 4
 
 =item B<Finding C<T(0,5)>>
 
-From our definition, C<T(0,5)> must have endpoints at C<0> and C<5>, and must
-also include all intermediate points C<1>-C<4>.  This means C<T(0,5)> is the
-union of C<T(0,4)> and the line segment C<4>-C<5>.
+From our definition, C<T(0,5)> must have endpoints C<0> and C<5>, and must also
+include all intermediate points C<1>-C<4>.  This means C<T(0,5)> is composed of
+points C<0> through C<5> in order.  This is also the union of C<T(0,4)> and the
+line segment C<4>-C<5>.
 
 =item B<Finding C<T(1,5)>>
 
@@ -151,14 +153,14 @@ Our logic for finding C<T(1,5)> applies to these cases as well.
 
 =item B<Finding C<T(4,5)>>
 
-Tour C<T(4,5)> breaks the pattern seen in C<T(0,5)> through C<T(3,5)>, since
-point 4 is now an endpoint in the tour.  Via a similar proof by contradiction,
-our choices for constructing C<T(4,5)> are:
+Tour C<T(4,5)> breaks the pattern seen in C<T(0,5)> through C<T(3,5)>, because
+the leftmost point (point 4) must be an endpoint in the tour.  Via proof by
+contradiction similar to the above, our choices for constructing C<T(4,5)> are:
 
-    T(0,4) + segment from 0 to 5
-    T(1,4) + segment from 1 to 5
-    T(2,4) + segment from 2 to 5
-    T(3,4) + segment from 3 to 5
+    T(0,4) + line segment from 0 to 5
+    T(1,4) + line segment from 1 to 5
+    T(2,4) + line segment from 2 to 5
+    T(3,4) + line segment from 3 to 5
 
 All of them meet our bitonicity requirements, so we choose the shortest of
 these for C<T(4,5)>.
@@ -182,7 +184,7 @@ C<< T(i,j) = min{ T(k,i) + delta(k,j) } >>, for all k < i
 
 =item 3. The base case.
 
-Tour C<T(0,1)> has to be the line segment from 0 to 1.
+The open tour C<T(0,1)> has to be the line segment from 0 to 1.
 
 =back
 
@@ -196,16 +198,17 @@ solution: I<overlapping subproblems> and I<optimal substructure>.
 The construction of tour C<T(i,j)> depends on knowledge of tours to the left of
 C<j>:
 
-    constructing:   depends on:
-    -------------   -----------
+    to construct:   one must know:
+    -------------   --------------
     T(0,5)          T(0,4)
     T(1,5)          T(1,4)
     T(2,5)          T(2,4)
     T(3,5)          T(3,4)
     T(4,5)          T(0,4), T(1,4), T(2,4), T(3,4)
 
-We also see that an optimal tour is used I<more than once> in constructing
-longer tours.
+We also see that a given optimal tour is used I<more than once> in constructing
+longer tours.  For example, C<T(1,4)> is used in the construction of both
+C<T(1,5)> and C<T(4,5)>.
 
 =head3 Optimal Substructure
 
@@ -213,6 +216,8 @@ As shown in the above analysis, constructing a given optimal tour depends on
 knowledge of shorter "included" optimal tours; suboptimal tours are irrelevant.
 
 =head1 EXERCISES
+
+These exercises may clarify the above analysis.
 
 =over 4
 
@@ -225,6 +230,10 @@ Consider the parallelogram ((0,0), (1,1), (2,0), (3,1)).
     c. Draw t[0,1].  Calculate its length.
     d. Draw t[0,2] and t[1,2].  Calculate their lengths.
     e. Draw t[0,3], t[1,3], and t[2,3].  Calculate their lengths.
+    f. What is the optimal bitonic tour?
+    g. Draw the suboptimal bitonic tour.
+    h. Why does the above algorithm find the optimal tour,
+       and not the suboptimal tour?
 
 =item Exercise 2.
 
@@ -653,7 +662,7 @@ L<http://en.wikipedia.org/wiki/Dynamic_programming>
 
 =head1 AUTHOR
 
-John Trammell, C<< <johntrammell at gmail.com> >>
+John Trammell, C<< <johntrammell at gmail dot com> >>
 
 =head1 BUGS
 
